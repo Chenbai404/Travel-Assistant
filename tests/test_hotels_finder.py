@@ -79,7 +79,7 @@ class TestHotelsFinder:
                 adults=1
             )
 
-            result = hotels_finder({'params': params})
+            result = hotels_finder.invoke({'params': params})
 
             assert isinstance(result, list)
             assert len(result) > 0
@@ -107,7 +107,7 @@ class TestHotelsFinder:
                 check_out_date='2024-06-22'
             )
 
-            result = hotels_finder({'params': params})
+            result = hotels_finder.invoke({'params': params})
 
             # Should still attempt search
             mock_serpapi.search.assert_called_once()
@@ -124,7 +124,7 @@ class TestHotelsFinder:
             )
 
             with pytest.raises(Exception, match="API call failed"):
-                hotels_finder({'params': params})
+                hotels_finder.invoke({'params': params})
 
     def test_date_format_validation(self, mock_serpapi_search):
         """Test date format validation."""
@@ -138,7 +138,7 @@ class TestHotelsFinder:
                 check_out_date='2024-06-22'
             )
 
-            result = hotels_finder({'params': params})
+            result = hotels_finder.invoke({'params': params})
 
             call_args = mock_serpapi.search.call_args[0][0]
             assert call_args['check_in_date'] == '2024-06-15'
@@ -156,7 +156,7 @@ class TestHotelsFinder:
                 hotel_class='4'  # 4-star hotels
             )
 
-            result = hotels_finder({'params': params})
+            result = hotels_finder.invoke({'params': params})
 
             call_args = mock_serpapi.search.call_args[0][0]
             assert call_args['hotel_class'] == '4'
@@ -174,7 +174,7 @@ class TestHotelsFinder:
                 sort_by=8  # Default: highest rating
             )
 
-            result = hotels_finder({'params': params})
+            result = hotels_finder.invoke({'params': params})
 
             call_args = mock_serpapi.search.call_args[0][0]
             assert call_args['sort_by'] == 8 or call_args['sort_by'] == '8'
@@ -193,7 +193,7 @@ class TestHotelsFinder:
                 rooms=1
             )
 
-            result = hotels_finder({'params': params})
+            result = hotels_finder.invoke({'params': params})
 
             call_args = mock_serpapi.search.call_args[0][0]
             assert call_args['adults'] == 2
@@ -219,7 +219,7 @@ class TestHotelsFinder:
                 check_out_date='2024-06-22'
             )
 
-            result = hotels_finder({'params': params})
+            result = hotels_finder.invoke({'params': params})
 
             # Should limit to 5 results
             assert len(result) <= 5
@@ -235,7 +235,7 @@ class TestHotelsFinder:
                 check_out_date='2024-06-22'
             )
 
-            result = hotels_finder({'params': params})
+            result = hotels_finder.invoke({'params': params})
 
             call_args = mock_serpapi.search.call_args[0][0]
             # Check default values
@@ -263,7 +263,7 @@ class TestHotelsFinder:
                     check_out_date='2024-06-22'
                 )
 
-                result = hotels_finder({'params': params})
+                result = hotels_finder.invoke({'params': params})
 
                 call_args = mock_serpapi.search.call_args[0][0]
                 assert call_args['q'] == location

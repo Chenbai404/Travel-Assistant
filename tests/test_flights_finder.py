@@ -86,7 +86,7 @@ class TestFlightsFinder:
                 adults=1
             )
 
-            result = flights_finder({'params': params})
+            result = flights_finder.invoke({'params': params})
 
             assert isinstance(result, list)
             assert len(result) > 0
@@ -115,7 +115,7 @@ class TestFlightsFinder:
                 outbound_date='2024-06-15'
             )
 
-            result = flights_finder({'params': params})
+            result = flights_finder.invoke({'params': params})
 
             # Should still attempt search but may fail or return empty
             mock_serpapi.search.assert_called_once()
@@ -131,7 +131,7 @@ class TestFlightsFinder:
                 outbound_date='2024-06-15'
             )
 
-            result = flights_finder({'params': params})
+            result = flights_finder.invoke({'params': params})
 
             # Should return error message
             assert isinstance(result, str)
@@ -150,7 +150,7 @@ class TestFlightsFinder:
                 return_date='2024-06-22'
             )
 
-            result = flights_finder({'params': params})
+            result = flights_finder.invoke({'params': params})
 
             call_args = mock_serpapi.search.call_args[0][0]
             assert call_args['outbound_date'] == '2024-06-15'
@@ -168,7 +168,7 @@ class TestFlightsFinder:
                 outbound_date='2024-06-15'
             )
 
-            result = flights_finder({'params': params})
+            result = flights_finder.invoke({'params': params})
 
             call_args = mock_serpapi.search.call_args[0][0]
             assert call_args['departure_id'] == 'JFK'
@@ -185,7 +185,7 @@ class TestFlightsFinder:
                 outbound_date='2024-06-15'
             )
 
-            result = flights_finder({'params': params})
+            result = flights_finder.invoke({'params': params})
 
             # Verify result is a list
             assert isinstance(result, list)
@@ -211,7 +211,7 @@ class TestFlightsFinder:
                 infants_on_lap=1
             )
 
-            result = flights_finder({'params': params})
+            result = flights_finder.invoke({'params': params})
 
             call_args = mock_serpapi.search.call_args[0][0]
             assert call_args['adults'] == 2
@@ -230,7 +230,7 @@ class TestFlightsFinder:
                 outbound_date='2024-06-15'
             )
 
-            result = flights_finder({'params': params})
+            result = flights_finder.invoke({'params': params})
 
             call_args = mock_serpapi.search.call_args[0][0]
             # Check default values
@@ -251,7 +251,7 @@ class TestFlightsFinder:
                 return_date=None  # One-way
             )
 
-            result = flights_finder({'params': params})
+            result = flights_finder.invoke({'params': params})
 
             call_args = mock_serpapi.search.call_args[0][0]
             assert call_args['return_date'] is None

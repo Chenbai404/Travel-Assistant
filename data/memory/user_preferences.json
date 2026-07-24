@@ -1,0 +1,19 @@
+{
+  "default": {
+    "budget": null,
+    "start_date": null,
+    "end_date": null,
+    "destination": null,
+    "interests": [
+      "cosplay",
+      "food"
+    ],
+    "companions": null,
+    "constraints": null,
+    "accessibility_needs": null,
+    "accommodation_type": null,
+    "transportation_preference": null,
+    "meal_preferences": null,
+    "last_updated": "2026-07-23T16:38:28.582006"
+  }
+}

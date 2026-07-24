@@ -84,7 +84,7 @@ class TestCollectPreferences:
                 user_input="I want to travel to Tokyo from March 15-20, 2024 with a budget of $2000. I'm interested in food, technology, and culture."
             )
 
-            result = collect_preferences({'params': params})
+            result = collect_preferences.invoke({'params': params})
 
             assert result['is_complete'] is True
             assert result['clarification_needed'] is False
@@ -107,7 +107,7 @@ class TestCollectPreferences:
                 user_input="I want to go to Paris in June for museums"
             )
 
-            result = collect_preferences({'params': params})
+            result = collect_preferences.invoke({'params': params})
 
             assert result['is_complete'] is False
             assert result['clarification_needed'] is True
@@ -137,7 +137,7 @@ class TestCollectPreferences:
                 current_preferences=current_prefs
             )
 
-            result = collect_preferences({'params': params})
+            result = collect_preferences.invoke({'params': params})
 
             # Should merge with current preferences
             assert result['preferences']['destination'] == 'Paris'
@@ -154,7 +154,7 @@ class TestCollectPreferences:
 
             params = PreferenceInput(user_input="Test input")
 
-            result = collect_preferences({'params': params})
+            result = collect_preferences.invoke({'params': params})
 
             # Should return error result
             assert result['is_complete'] is False
@@ -171,7 +171,7 @@ class TestCollectPreferences:
 
             params = PreferenceInput(user_input="Test input")
 
-            result = collect_preferences({'params': params})
+            result = collect_preferences.invoke({'params': params})
 
             # Should return error result
             assert result['is_complete'] is False
@@ -209,7 +209,7 @@ class TestCollectPreferences:
                 mock_llm_class.return_value = mock_llm
 
                 params = PreferenceInput(user_input="Test input")
-                result = collect_preferences({'params': params})
+                result = collect_preferences.invoke({'params': params})
 
                 assert result['preferences']['start_date'] == expected_date
 
@@ -244,7 +244,7 @@ class TestCollectPreferences:
                 mock_llm_class.return_value = mock_llm
 
                 params = PreferenceInput(user_input="Test input")
-                result = collect_preferences({'params': params})
+                result = collect_preferences.invoke({'params': params})
 
                 if result['preferences']['budget']:
                     assert result['preferences']['budget']['amount'] == expected_budget['amount']
@@ -257,7 +257,7 @@ class TestCollectPreferences:
             mock_llm_class.return_value = mock_llm
 
             params = PreferenceInput(user_input="Test input")
-            result = collect_preferences({'params': params})
+            result = collect_preferences.invoke({'params': params})
 
             assert result['is_complete'] is True
             assert result['preferences']['destination'] == 'London'
@@ -284,7 +284,7 @@ class TestCollectPreferences:
             mock_llm_class.return_value = mock_llm
 
             params = PreferenceInput(user_input="Test input")
-            result = collect_preferences({'params': params})
+            result = collect_preferences.invoke({'params': params})
 
             assert result['is_complete'] is False
             assert 'interests' in result['missing_fields']

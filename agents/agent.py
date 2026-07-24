@@ -1,255 +1,174 @@
-# pylint: disable = http-used,print-used,no-self-use
+"""LangGraph orchestration for the travel-planning agent."""
 
-import datetime
 import operator
 import os
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, Callable, TypedDict
 
 from dotenv import load_dotenv
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
-from agents.tools.flights_finder import flights_finder
-from agents.tools.hotels_finder import hotels_finder
-from agents.tools.collect_preferences import collect_preferences
+from agents.nodes.budget_estimator import BudgetEstimatorNode
+from agents.nodes.destination_search import DestinationSearchNode
+from agents.nodes.itinerary_synthesizer import ItinerarySynthesizerNode
+from agents.nodes.preference_collector import PreferenceCollectorNode
+from agents.nodes.route_planner import RoutePlannerNode
+from agents.nodes.safety_reviewer import SafetyReviewerNode
 
-_ = load_dotenv()
-
-CURRENT_YEAR = datetime.datetime.now().year
+load_dotenv()
 
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
+    """Shared state passed between Phase 2 workflow nodes."""
+
     messages: Annotated[list[AnyMessage], operator.add]
+    user_id: str
     preferences: dict
+    missing_fields: list[str]
+    preferences_complete: bool
+    clarification_count: int
+    places: list[dict]
+    routes: list[dict]
+    budget: dict
+    itinerary: dict
 
 
-TOOLS_SYSTEM_PROMPT = f"""You are a smart travel planning assistant. Your goal is to help users plan their trips by collecting preferences and providing travel information.
-
-IMPORTANT: Always start by collecting user preferences using the collect_preferences tool. This tool will:
-- Extract structured travel preferences from natural language input
-- Identify missing required fields (destination, dates, budget, interests)
-- Determine if clarification is needed
-
-Required fields for complete trip planning:
-- destination: Where they want to go
-- start_date and end_date: When they want to travel
-- budget: Their total budget with currency
-- interests: What they're interested in (museums, food, nature, etc.)
-
-Only after preferences are complete (is_complete=true) should you proceed to search for flights and hotels.
-
-When preferences are incomplete:
-- Use the collect_preferences tool with the user's input
-- If clarification_needed is true, ask for the missing fields listed in missing_fields
-- Be polite and helpful in requesting additional information
-
-When preferences are complete:
-- Use flights_finder to search for flights
-- Use hotels_finder to search for hotels
-- Provide comprehensive travel information with prices and links
-
-The current year is {CURRENT_YEAR}.
-You are allowed to make multiple calls (either together or in sequence).
-Only look up information when you are sure of what you want.
-If you need to look up some information before asking a follow up question, you are allowed to do that!
-
-I want to have in your output links to hotels websites and flights websites (if possible).
-I want to have as well the logo of the hotel and the logo of the airline company (if possible).
-In your output always include the price of the flight and the price of the hotel and the currency as well (if possible).
-for example for hotels-
-Rate: $581 per night
-Total: $3,488
-"""
-
-TOOLS = [collect_preferences, flights_finder, hotels_finder]
-
-EMAILS_SYSTEM_PROMPT = """Your task is to convert structured markdown-like text into a valid HTML email body.
-
-- Do not include a ```html preamble in your response.
-- The output should be in proper HTML format, ready to be used as the body of an email.
-Here is an example:
-<example>
-Input:
-
-I want to travel to New York from Madrid from October 1-7. Find me flights and 4-star hotels.
-
-Expected Output:
-
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Flight and Hotel Options</title>
-</head>
-<body>
-    <h2>Flights from Madrid to New York</h2>
-    <ol>
-        <li>
-            <strong>American Airlines</strong><br>
-            <strong>Departure:</strong> Adolfo Suárez Madrid–Barajas Airport (MAD) at 10:25 AM<br>
-            <strong>Arrival:</strong> John F. Kennedy International Airport (JFK) at 12:25 PM<br>
-            <strong>Duration:</strong> 8 hours<br>
-            <strong>Aircraft:</strong> Boeing 777<br>
-            <strong>Class:</strong> Economy<br>
-            <strong>Price:</strong> $702<br>
-            <img src="https://www.gstatic.com/flights/airline_logos/70px/AA.png" alt="American Airlines"><br>
-            <a href="https://www.google.com/flights">Book on Google Flights</a>
-        </li>
-        <li>
-            <strong>Iberia</strong><br>
-            <strong>Departure:</strong> Adolfo Suárez Madrid–Barajas Airport (MAD) at 12:25 PM<br>
-            <strong>Arrival:</strong> John F. Kennedy International Airport (JFK) at 2:40 PM<br>
-            <strong>Duration:</strong> 8 hours 15 minutes<br>
-            <strong>Aircraft:</strong> Airbus A330<br>
-            <strong>Class:</strong> Economy<br>
-            <strong>Price:</strong> $702<br>
-            <img src="https://www.gstatic.com/flights/airline_logos/70px/IB.png" alt="Iberia"><br>
-            <a href="https://www.google.com/flights">Book on Google Flights</a>
-        </li>
-        <li>
-            <strong>Delta Airlines</strong><br>
-            <strong>Departure:</strong> Adolfo Suárez Madrid–Barajas Airport (MAD) at 10:00 AM<br>
-            <strong>Arrival:</strong> John F. Kennedy International Airport (JFK) at 12:30 PM<br>
-            <strong>Duration:</strong> 8 hours 30 minutes<br>
-            <strong>Aircraft:</strong> Boeing 767<br>
-            <strong>Class:</strong> Economy<br>
-            <strong>Price:</strong> $738<br>
-            <img src="https://www.gstatic.com/flights/airline_logos/70px/DL.png" alt="Delta Airlines"><br>
-            <a href="https://www.google.com/flights">Book on Google Flights</a>
-        </li>
-    </ol>
-
-    <h2>4-Star Hotels in New York</h2>
-    <ol>
-        <li>
-            <strong>NobleDen Hotel</strong><br>
-            <strong>Description:</strong> Modern, polished hotel offering sleek rooms, some with city-view balconies, plus free Wi-Fi.<br>
-            <strong>Location:</strong> Near Washington Square Park, Grand St, and JFK Airport.<br>
-            <strong>Rate per Night:</strong> $537<br>
-            <strong>Total Rate:</strong> $3,223<br>
-            <strong>Rating:</strong> 4.8/5 (656 reviews)<br>
-            <strong>Amenities:</strong> Free Wi-Fi, Parking, Air conditioning, Restaurant, Accessible, Business centre, Child-friendly, Smoke-free property<br>
-            <img src="https://lh5.googleusercontent.com/p/AF1QipNDUrPJwBhc9ysDhc8LA822H1ZzapAVa-WDJ2d6=s287-w287-h192-n-k-no-v1" alt="NobleDen Hotel"><br>
-            <a href="http://www.nobleden.com/">Visit Website</a>
-        </li>
-        <!-- More hotel entries here -->
-    </ol>
-</body>
-</html>
-
-</example>
-
-
+EMAIL_SYSTEM_PROMPT = """Convert the supplied travel plan into a valid HTML email.
+Return only the HTML document. Preserve headings, tables, warnings, prices, and
+confirmation items. Do not invent facts, bookings, prices, or links.
 """
 
 
 class Agent:
+    """Build and expose the Phase 2 travel planning workflow."""
 
-    def __init__(self):
-        self._tools = {t.name: t for t in TOOLS}
-        api_key = os.getenv("OPENAI_API_KEY")
-        print(f"DEBUG: OPENAI_API_KEY exists: {bool(api_key)}")
-        print(f"DEBUG: OPENAI_API_KEY length: {len(api_key) if api_key else 0}")
-        
-        try:
-            self._tools_llm = ChatOpenAI(
-                model="qwen3.7-max",
-                api_key=api_key,
-                base_url="https://ws-701qztd515ek1e5g.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
-                timeout=30.0
-            ).bind_tools(TOOLS)
-            print("DEBUG: Tools LLM initialized successfully")
-        except Exception as e:
-            print(f"ERROR: Failed to initialize tools LLM: {e}")
-            raise
+    def __init__(
+        self,
+        *,
+        preference_llm=None,
+        destination_llm=None,
+        email_llm=None,
+        preference_memory=None,
+        email_transport: Callable[[str, str, str, str], Any] | None = None,
+        checkpointer=None,
+        verbose: bool = False,
+    ):
+        self._email_llm = email_llm
+        self._email_transport = email_transport or self._send_via_sendgrid
+
+        preference_node = PreferenceCollectorNode(
+            llm=preference_llm,
+            memory=preference_memory,
+        )
+        destination_node = DestinationSearchNode(llm=destination_llm)
+        route_node = RoutePlannerNode()
+        budget_node = BudgetEstimatorNode()
+        itinerary_node = ItinerarySynthesizerNode()
+        safety_node = SafetyReviewerNode()
 
         builder = StateGraph(AgentState)
-        builder.add_node('call_tools_llm', self.call_tools_llm)
-        builder.add_node('invoke_tools', self.invoke_tools)
+        builder.add_node('preference_collector', preference_node)
+        builder.add_node('destination_search', destination_node)
+        builder.add_node('route_planner', route_node)
+        builder.add_node('budget_estimator', budget_node)
+        builder.add_node('itinerary_synthesizer', itinerary_node)
+        builder.add_node('safety_reviewer', safety_node)
         builder.add_node('email_sender', self.email_sender)
-        builder.set_entry_point('call_tools_llm')
 
-        builder.add_conditional_edges('call_tools_llm', Agent.exists_action, {'more_tools': 'invoke_tools', 'email_sender': 'email_sender'})
-        builder.add_edge('invoke_tools', 'call_tools_llm')
+        builder.set_entry_point('preference_collector')
+        builder.add_conditional_edges(
+            'preference_collector',
+            self._route_after_preferences,
+            {
+                'complete': 'destination_search',
+                'incomplete': END,
+            },
+        )
+        builder.add_edge('destination_search', 'route_planner')
+        builder.add_edge('route_planner', 'budget_estimator')
+        builder.add_edge('budget_estimator', 'itinerary_synthesizer')
+        builder.add_edge('itinerary_synthesizer', 'safety_reviewer')
+        builder.add_edge('safety_reviewer', 'email_sender')
         builder.add_edge('email_sender', END)
-        memory = MemorySaver()
-        self.graph = builder.compile(checkpointer=memory, interrupt_before=['email_sender'])
 
-        print(self.graph.get_graph().draw_mermaid())
+        self.graph = builder.compile(
+            checkpointer=checkpointer or MemorySaver(),
+            interrupt_before=['email_sender'],
+        )
+
+        if verbose:
+            print(self.graph.get_graph().draw_mermaid())
 
     @staticmethod
-    def exists_action(state: AgentState):
-        result = state['messages'][-1]
-        if len(result.tool_calls) == 0:
-            return 'email_sender'
-        return 'more_tools'
+    def _route_after_preferences(state: AgentState) -> str:
+        return 'complete' if state.get('preferences_complete') else 'incomplete'
 
-    def email_sender(self, state: AgentState):
-        print('Sending email')
-        email_llm = ChatOpenAI(
+    def email_sender(self, state: AgentState) -> dict:
+        """Render the reviewed plan to HTML and send it through the transport."""
+
+        content = self._email_source_content(state)
+        llm = self._email_llm or self._build_email_llm()
+        response = llm.invoke(
+            [
+                SystemMessage(content=EMAIL_SYSTEM_PROMPT),
+                HumanMessage(content=content),
+            ]
+        )
+
+        sender = self._required_env('FROM_EMAIL')
+        receiver = self._required_env('TO_EMAIL')
+        subject = self._required_env('EMAIL_SUBJECT')
+        self._email_transport(sender, receiver, subject, response.content)
+
+        return {
+            'messages': [AIMessage(content="邮件已成功发送。")],
+        }
+
+    @staticmethod
+    def _email_source_content(state: AgentState) -> str:
+        messages = state.get('messages', [])
+        if messages:
+            return str(messages[-1].content)
+        itinerary = state.get('itinerary', {})
+        if itinerary:
+            return str(itinerary)
+        raise ValueError("No reviewed itinerary is available for email")
+
+    @staticmethod
+    def _build_email_llm():
+        return ChatOpenAI(
             model="qwen3.7-max",
             api_key=os.getenv("OPENAI_API_KEY"),
-            base_url="https://ws-701qztd515ek1e5g.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
-            temperature=0.1
+            base_url=(
+                "https://ws-701qztd515ek1e5g.cn-beijing.maas.aliyuncs.com/"
+                "compatible-mode/v1"
+            ),
+            temperature=0.1,
         )
-        email_message = [SystemMessage(content=EMAILS_SYSTEM_PROMPT), HumanMessage(content=state['messages'][-1].content)]
-        email_response = email_llm.invoke(email_message)
-        print('Email content:', email_response.content)
 
-        message = Mail(from_email=os.environ['FROM_EMAIL'], to_emails=os.environ['TO_EMAIL'], subject=os.environ['EMAIL_SUBJECT'],
-                       html_content=email_response.content)
-        try:
-            sg = SendGridAPIClient(os.environ.get('SENDGRID_API_KEY'))
-            response = sg.send(message)
-            print(response.status_code)
-            print(response.body)
-            print(response.headers)
-        except Exception as e:
-            print(str(e))
+    @staticmethod
+    def _required_env(name: str) -> str:
+        value = os.getenv(name)
+        if not value:
+            raise ValueError(f"Missing required environment variable: {name}")
+        return value
 
-    def call_tools_llm(self, state: AgentState):
-        print("DEBUG: call_tools_llm called")
-        messages = state['messages']
-        print(f"DEBUG: Number of messages: {len(messages)}")
-        messages = [SystemMessage(content=TOOLS_SYSTEM_PROMPT)] + messages
-        try:
-            print("DEBUG: Invoking tools LLM...")
-            message = self._tools_llm.invoke(messages)
-            print(f"DEBUG: LLM response received, tool calls: {len(message.tool_calls) if hasattr(message, 'tool_calls') else 0}")
-            return {'messages': [message]}
-        except Exception as e:
-            print(f"ERROR: LLM invocation failed: {e}")
-            raise
-
-    def invoke_tools(self, state: AgentState):
-        tool_calls = state['messages'][-1].tool_calls
-        results = []
-        updated_preferences = {}
-        
-        for t in tool_calls:
-            print(f'Calling: {t}')
-            if not t['name'] in self._tools:  # check for bad tool name from LLM
-                print('\n ....bad tool name....')
-                result = 'bad tool name, retry'  # instruct LLM to retry if bad
-            else:
-                result = self._tools[t['name']].invoke(t['args'])
-                
-                # Handle collect_preferences result to update state
-                if t['name'] == 'collect_preferences':
-                    if isinstance(result, dict) and 'preferences' in result:
-                        updated_preferences = result['preferences']
-                        print(f'Updated preferences: {updated_preferences}')
-            
-            results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=str(result)))
-        
-        print('Back to the model!')
-        
-        # Return both messages and updated preferences
-        return_value = {'messages': results}
-        if updated_preferences:
-            return_value['preferences'] = updated_preferences
-        
-        return return_value
+    @staticmethod
+    def _send_via_sendgrid(
+        sender: str,
+        receiver: str,
+        subject: str,
+        html_content: str,
+    ) -> None:
+        api_key = Agent._required_env('SENDGRID_API_KEY')
+        message = Mail(
+            from_email=sender,
+            to_emails=receiver,
+            subject=subject,
+            html_content=html_content,
+        )
+        SendGridAPIClient(api_key).send(message)

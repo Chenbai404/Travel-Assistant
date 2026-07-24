@@ -21,7 +21,7 @@ def send_email(sender_email, receiver_email, subject, thread_id):
         st.session_state.agent.graph.invoke(None, config=config)
         st.success('Email sent successfully!')
         # Clear session state
-        for key in ['travel_info', 'thread_id']:
+        for key in ['travel_info', 'planning_result', 'thread_id', 'user_id']:
             st.session_state.pop(key, None)
     except Exception as e:
         st.error(f'Error sending email: {e}')
@@ -93,18 +93,33 @@ def process_query(user_input):
             # Use existing thread_id if available, otherwise create new one
             if 'thread_id' not in st.session_state:
                 st.session_state.thread_id = str(uuid.uuid4())
+            if 'user_id' not in st.session_state:
+                st.session_state.user_id = st.session_state.thread_id
             
             thread_id = st.session_state.thread_id
             messages = [HumanMessage(content=user_input)]
             config = {'configurable': {'thread_id': thread_id}}
 
-            result = st.session_state.agent.graph.invoke({'messages': messages}, config=config)
+            result = st.session_state.agent.graph.invoke(
+                {
+                    'messages': messages,
+                    'user_id': st.session_state.user_id,
+                },
+                config=config,
+            )
 
-            st.subheader('Travel Information')
-            # Use st.markdown with disable_markdown to make text selectable/copyable
-            st.markdown(result['messages'][-1].content, unsafe_allow_html=False)
+            latest_content = result['messages'][-1].content
+            if result.get('preferences_complete'):
+                st.subheader('Travel Information')
+            else:
+                st.subheader('More Information Needed')
+            st.markdown(latest_content, unsafe_allow_html=False)
 
-            st.session_state.travel_info = result['messages'][-1].content
+            st.session_state.planning_result = result
+            if result.get('preferences_complete') and result.get('itinerary'):
+                st.session_state.travel_info = latest_content
+            else:
+                st.session_state.pop('travel_info', None)
 
         except Exception as e:
             st.error(f'Error: {e}')

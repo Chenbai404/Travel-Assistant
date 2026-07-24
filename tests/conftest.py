@@ -1,9 +1,25 @@
 """Pytest configuration and shared fixtures."""
 
 import os
+import socket
 import sys
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+
+TEST_ENV_VARS = {
+    'OPENAI_API_KEY': 'offline-test-key',
+    'SERPAPI_API_KEY': 'offline-serpapi-key',
+    'FROM_EMAIL': 'test@example.com',
+    'TO_EMAIL': 'recipient@example.com',
+    'EMAIL_SUBJECT': 'Test Travel Information',
+    'SENDGRID_API_KEY': 'offline-sendgrid-key',
+    'LANGCHAIN_TRACING_V2': 'false',
+    'LANGSMITH_TRACING': 'false',
+}
+
+# Set safe values before application modules import and call load_dotenv().
+os.environ.update(TEST_ENV_VARS)
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -12,17 +28,30 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 @pytest.fixture
 def mock_env_vars():
     """Mock environment variables for testing."""
-    env_vars = {
-        'OPENAI_API_KEY': 'test_api_key_12345',
-        'SERPAPI_API_KEY': 'test_serpapi_key_67890',
-        'FROM_EMAIL': 'test@example.com',
-        'TO_EMAIL': 'recipient@example.com',
-        'EMAIL_SUBJECT': 'Test Travel Information',
-        'SENDGRID_API_KEY': 'test_sendgrid_key'
-    }
-    
-    with patch.dict(os.environ, env_vars):
-        yield env_vars
+    with patch.dict(os.environ, TEST_ENV_VARS):
+        yield TEST_ENV_VARS
+
+
+@pytest.fixture(autouse=True)
+def isolate_external_state(tmp_path, monkeypatch):
+    """Keep every test offline and isolate the global preference store."""
+
+    for name, value in TEST_ENV_VARS.items():
+        monkeypatch.setenv(name, value)
+
+    def reject_network(*_args, **_kwargs):
+        raise RuntimeError("Network access is disabled in the offline test suite")
+
+    monkeypatch.setattr(socket, 'create_connection', reject_network)
+    monkeypatch.setattr(socket.socket, 'connect', reject_network)
+
+    from agents.memory import preference_memory
+
+    memory = preference_memory.PreferenceMemory(
+        storage_dir=str(tmp_path / "memory")
+    )
+    monkeypatch.setattr(preference_memory, '_memory_instance', memory)
+    yield
 
 
 @pytest.fixture

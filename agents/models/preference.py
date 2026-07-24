@@ -1,11 +1,11 @@
 """Travel preference data models."""
 
 from typing import Optional, TypedDict
-from datetime import date
 
 
-class TravelPreference(TypedDict):
-    """Structured travel preference data."""
+class TravelPreference(TypedDict, total=False):
+    """Structured travel preferences accumulated across conversation turns."""
+
     destination: Optional[str]
     start_date: Optional[str]
     end_date: Optional[str]

@@ -1,12 +1,20 @@
 """Constraint normalization module for standardizing travel preferences."""
 
 import re
-from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, Optional
 
 
 class ConstraintNormalizer:
     """Normalizes and standardizes travel constraint data."""
+
+    CURRENCY_SYMBOLS = {
+        '$': 'USD',
+        '€': 'EUR',
+        '£': 'GBP',
+        '¥': 'CNY',
+        '₹': 'INR',
+    }
 
     @staticmethod
     def normalize_budget(budget_input: Any) -> Optional[Dict[str, Any]]:
@@ -26,10 +34,12 @@ class ConstraintNormalizer:
             if 'amount' in budget_input and 'currency' in budget_input:
                 try:
                     amount = float(budget_input['amount'])
+                    currency = str(budget_input['currency']).strip()
                     return {
                         'amount': amount,
-                        'currency': budget_input['currency'].upper(),
-                        'original_input': budget_input
+                        'currency': ConstraintNormalizer.CURRENCY_SYMBOLS.get(
+                            currency, currency.upper()
+                        ),
                     }
                 except (ValueError, TypeError):
                     return None
@@ -61,8 +71,9 @@ class ConstraintNormalizer:
                         amount = float(amount_str.replace(',', ''))
                         return {
                             'amount': amount,
-                            'currency': currency.upper() if len(currency) > 1 else currency,
-                            'original_input': budget_input
+                            'currency': ConstraintNormalizer.CURRENCY_SYMBOLS.get(
+                                currency, currency.upper()
+                            ),
                         }
                     except (ValueError, TypeError):
                         continue
@@ -73,7 +84,6 @@ class ConstraintNormalizer:
                 return {
                     'amount': float(budget_input),
                     'currency': 'USD',
-                    'original_input': budget_input
                 }
             except (ValueError, TypeError):
                 return None
@@ -121,18 +131,18 @@ class ConstraintNormalizer:
             date_input_lower = date_input.lower().strip()
             
             if date_input_lower == 'tomorrow':
-                return (today + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+                return (today + timedelta(days=1)).strftime('%Y-%m-%d')
             elif date_input_lower == 'today':
                 return today.strftime('%Y-%m-%d')
             elif date_input_lower == 'next week':
-                return (today + datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+                return (today + timedelta(days=7)).strftime('%Y-%m-%d')
         
         # If date object, format it
         if isinstance(date_input, datetime):
             return date_input.strftime('%Y-%m-%d')
         
         if isinstance(date_input, date):
-            return datetime.combine(date_input, datetime.min.time()).strftime('%Y-%m-%d')
+            return date_input.strftime('%Y-%m-%d')
         
         return None
 
@@ -192,6 +202,28 @@ class ConstraintNormalizer:
         # Copy other fields as-is (could add more normalization as needed)
         for key, value in preferences.items():
             if key not in ['budget', 'start_date', 'end_date', 'destination']:
-                normalized[key] = value
+                if key in {
+                    'interests',
+                    'companions',
+                    'constraints',
+                    'accessibility_needs',
+                    'meal_preferences',
+                }:
+                    if value is None:
+                        normalized[key] = None
+                    elif isinstance(value, list):
+                        normalized[key] = [
+                            str(item).strip()
+                            for item in value
+                            if str(item).strip()
+                        ]
+                    else:
+                        normalized[key] = [str(value).strip()]
+                elif key in {'accommodation_type', 'transportation_preference'}:
+                    normalized[key] = (
+                        str(value).strip().lower() if value is not None else None
+                    )
+                else:
+                    normalized[key] = value
         
         return normalized
